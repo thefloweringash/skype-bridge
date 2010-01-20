@@ -11,14 +11,14 @@ def SendToIrc(skypeChat, user, message):
     ircserver = skype2irc.get(skypeChat.Name)
     if ircserver is not None:
         server = ircservers[ircserver[0]]
-        server.connection.privmsg(ircserver[1], "< %s> %s" % (user, message))
+        server.connection.privmsg(ircserver[1], "%s: %s" % (user, message))
     else:
         print "Unroutable message from %s" % skypeChat
 
 def SendToSkype(ircserver, ircchannel, user, message):
-    skypechat = irc2skype.get((ircserver, ircchannel))
+    skypechat = irc2skype.get((ircserver, ircchannel.lower()))
     if skypechat is not None:
-        skype.Chat(skypechat).SendMessage("< %s> %s" % (user, message))
+        skype.Chat(skypechat).SendMessage("%s: %s" % (user, message))
     else:
         print "Unroutable message from %s/%s" % (ircserver, ircchannel)
 
@@ -35,12 +35,13 @@ def OnMessageStatus(Message, Status):
     else:
         print "Ignoring from skype: %s/%s" % (Message.FromDisplayName, Message.Body)
 
-skype = Skype4Py.Skype()
+skype = Skype4Py.Skype(Transport='x11')
 skype.OnAttachmentStatus = OnAttach
 skype.OnMessageStatus = OnMessageStatus
 
 print 'Connecting to Skype..'
 skype.Attach()
+print 'connected to skype'
 
 # irc
 
@@ -50,7 +51,7 @@ class DumbIrcClient(irclib.SimpleIRCClient):
 
     def on_welcome(self,c,e):
         print "Welcomed!"
-        c.join("#flood")
+        c.join("#WellingtonLunchChat")
     def on_pubmsg(self,c,e):
         user = e.source()
         user = user[0:user.index('!')]
@@ -59,7 +60,9 @@ class DumbIrcClient(irclib.SimpleIRCClient):
     def run(self):
         self.ircobj.process_forever()
 
-chatmaps = [("#chris.andreae/$c301b64f21991556", ("irc.sitharus.com", "#flood"))]
+chatmaps = []
+chatmaps = [("#chris.andreae/$b81041707fc653fb",
+             ("irc.sitharus.com", "#WellingtonLunchChat".lower()))]
 skype2irc = {}
 irc2skype = {}
 
