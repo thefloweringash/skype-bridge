@@ -31,9 +31,16 @@ class BridgeEndPoint:
     def receiveUserMessage(self, user, message):
         raise Exception("Called abstract base end point receive")
 
+    def destroy(self):
+        print "Warning: destroyed abstract base"
+
     def Bridge(end1, end2):
         end1.setEndPoint(end2)
         end2.setEndPoint(end1)
+
+    def Unbridge(end1, end2):
+        end1.setEndPoint(None)
+        end2.setEndPoint(None)
 
 # A filter endpoint wraps another endpoint, and permits filtering (modifying or swallowing)
 # incoming or outgoing messages.  Override filter_incoming/filter_outgoing, in subclasses,
@@ -66,6 +73,9 @@ class FilterEndPoint(BridgeEndPoint):
     def filter_outgoing(self, user, message):
         return (user, message)
 
+    def destroy(self):
+        self.target.destroy()
+
 #example
 class IRCHighlightFilterEndPoint(FilterEndPoint):
     def __init__(self, target, hilites):
@@ -85,6 +95,7 @@ class SkypeClient:
         self.skype = Skype4Py.Skype(Transport='x11')
         self.skype.OnAttachmentStatus = lambda s: self.onSkypeAttach(s)
         self.skype.OnMessageStatus = lambda m, s: self.onSkypeMessageStatus(m, s)
+        self.connect()
 
     def connect(self):
         print 'Connecting to Skype...'
@@ -109,14 +120,18 @@ class SkypeClient:
             debug("Ignored (type)")
 
     def getChat(self, chatName):
-        channel = SkypeClient.SkypeChat(self.skype, chatName)
+        channel = SkypeClient.SkypeChat(self, self.skype, chatName)
         self.channels[chatName] = channel
         return channel
 
+    def removeChat(self, chatName):
+        self.channels[chatName] = None
+
     # Object to be passed to the IRC instance to encapsulate communicating with a particular skype chat
     class SkypeChat(BridgeEndPoint):
-        def __init__(self, skype, chatName):
+        def __init__(self, skypeClient, skype, chatName):
             BridgeEndPoint.__init__(self)
+            self.skypeClient = skypeClient
             self.skype = skype
             self.chatName = chatName
 
@@ -127,9 +142,12 @@ class SkypeClient:
         def description(self):
             "Skype chat %s" % self.chatName
 
+        def destroy(self):
+            self.setEndPoint(None)
+            self.skypeClient.removeChat(self.chatName)
 
-# irc.  Currently one connection per channel, a future optimisation
-# would be to separate the IRC server connections from the channels
+
+# irc. 
 
 class IRCClient(irclib.SimpleIRCClient):
     def __init__(self, host, nick):
@@ -137,6 +155,7 @@ class IRCClient(irclib.SimpleIRCClient):
         self.host = host
         self.nick = nick
         self.channels = {}
+        self.connectServer()
 
     def on_welcome(self,c,e):
         print "Welcomed to %s, ready to join!" % (self.host)
@@ -155,6 +174,7 @@ class IRCClient(irclib.SimpleIRCClient):
             print "Ignoring message, no channel"
 
     def connectServer(self):
+        print "Connecting to irc server %s.."%self.host
         self.connect(self.host, 6667, self.nick)
         threading.Thread(None, lambda: self.ircobj.process_forever()).start()
         
@@ -170,6 +190,10 @@ class IRCClient(irclib.SimpleIRCClient):
         debug("Passed message into to IRC channel: %s %s" %(channelName, message))
         self.connection.privmsg(channelName, message)
 
+    def removeChannel(self, channelName):
+        self.connection.part(channelName)
+        self.channels[channelName] = None
+        # Todo: check size of channels hash, disconnect if empty
 
     class IRCChannel(BridgeEndPoint):
         def __init__(self, server, channelName):
@@ -183,25 +207,56 @@ class IRCClient(irclib.SimpleIRCClient):
 
         def description(self):
             return "IRC channel %s on %s" % (self.channelName, self.server.host)
+        
+        def destroy(self):
+            self.setEndPoint(None)
+            self.server.removeChannel(self.channelName)
 
 
-# we build bridge end points, and then bridge them together
 
-skypeInstance = SkypeClient()
-skypeInstance.connect()
+class BridgeManager:
+    def __init__(self):
+        # create and connect up our services
+        self.skypeInstance = SkypeClient()
+        self.ircServers = {}
+    
+    def createEndpoint(self, type, params):
+        type = type.lower()
+        if type == 'skype':
+            return self.skypeInstance.getChat(params["chat"])  #todo: error handling for params
+        elif type == 'irc':
+            key = (server, nick) = (params["server"], params["nick"])
+            s = self.ircServers.get(key)
+            if not s:
+                s = IRCClient(server, nick)
+                self.ircServers[key] = s
+            return s.getChannel(params["channel"])
+        else:
+            print "Unknown endpoint type"
+            
+    def bridge(self, a, b):
+        BridgeEndPoint.Bridge(a, b)
 
-skypeChat = skypeInstance.getChat("#chris.andreae/$b81041707fc653fb")
-skypeChat2 = skypeInstance.getChat("#skype.irc.bridge/$andrew.childs.cons;18d2f66a4e56f2dd")
+    def unbridge(self, a, b):
+        BridgeEndPoint.Unbridge(a, b)
+        
+m = BridgeManager()
 
-ircServer = IRCClient("irc.sitharus.com", "cskype")
-ircServer.connectServer()
+skypeChat = m.createEndpoint('skype', {"chat": "#chris.andreae/$b81041707fc653fb"})
+skypeChat2 = m.createEndpoint('skype', {"chat": "#skype.irc.bridge/$andrew.childs.cons;18d2f66a4e56f2dd"})
 
-ircChannel = ircServer.getChannel("#wellingtonlunchchat")
-ircChannel2 = ircServer.getChannel("#bridgedev")
+ircChannel = m.createEndpoint("irc", {"server": "irc.sitharus.com","nick": "cskype", "channel": "#wellingtonlunchchat"})
+ircChannel2 = m.createEndpoint("irc", {"server": "irc.sitharus.com","nick": "cskype", "channel": "#bridgedev"})
+
+ircChannelx = m.createEndpoint("irc", {"server": "irc.sitharus.com","nick": "circ", "channel": "#bridgedev"})
+ircChannely = m.createEndpoint("irc", {"server": "irc.sitharus.com","nick": "circ", "channel": "#bridgedev2"})
+
 ircFilter = IRCHighlightFilterEndPoint(ircChannel2, ["chris", "lorne"])
 
-BridgeEndPoint.Bridge(skypeChat, ircChannel)
-BridgeEndPoint.Bridge(skypeChat2, ircFilter)
+bridge1 = m.bridge(skypeChat, ircChannel)
+bridge2 = m.bridge(skypeChat2, ircFilter)
+
+bridge3 = m.bridge(ircChannelx, ircChannely)
 
 print "Unblocked, manual loop"
 Cmd = ''
