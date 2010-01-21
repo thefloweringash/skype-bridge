@@ -127,7 +127,7 @@ class IrcChannelClient(irclib.SimpleIRCClient, BridgeEndPoint):
     def description(self):
         return "IRC channel %s on %s" % (self.channel, self.host)
 
-# we maintain a one to one mapping of IRC channels to skype chats
+# we build bridge end points, and then bridge them together
 
 skypeInstance = SkypeClient()
 skypeInstance.connect()
