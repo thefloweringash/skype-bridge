@@ -10,12 +10,34 @@ def debug(str):
     if DEBUG_VERBOSE:
         print str
 
-# There is one skype instance, and one IRC instance per client
-# To make a bridge, we create and connect an irc instance for the irc channel,
-# then call SkypeClient.bridgeChatToIRC(chatName, ircInstance)
 
-# skype
+class BridgeEndPoint:
+    def __init__(self):
+        self.endpoint = None
 
+    def setEndPoint(self, endpoint):
+        self.endpoint = endpoint
+    
+    def pushUserMessage(self, user, message):
+        if(self.endpoint):
+            debug("pushed message to remote end point")
+            self.endpoint.receiveUserMessage(user, message)
+        else:
+            print "Warning, discarded message on unconnected end point: %s" % self.description()
+
+    def description(self):
+        return "abstract base end point"
+
+    def receiveUserMessage(self, user, message):
+        raise Exception("Called abstract base end point receive")
+
+    def Bridge(end1, end2):
+        end1.setEndPoint(end2)
+        end2.setEndPoint(end1)
+
+
+# There is one skype instance.  We can get chat end points by calling its getChat method
+# with the id of the skype chat
 class SkypeClient:
     def __init__(self):
         self.channels = {}
@@ -37,35 +59,41 @@ class SkypeClient:
         debug("Status from skype %s/%s Status==%s" % (Message.FromDisplayName, Message.Body, Status))
         if Status == 'RECEIVED': # or Status == 'SENT':
             chatName = Message.Chat.Name
-            if(self.channels[chatName] is not None):
-                debug("Dispatched to IRCClient")
-                self.channels[chatName].sendUserMessage(Message.FromDisplayName, Message.Body)
+            if self.channels.get(chatName) is not None:
+                debug("Dispatched from skype instance to chat endpoint")
+                self.channels[chatName].pushUserMessage(Message.FromDisplayName, Message.Body)
             else:
                 print "Ignored message from unassociated Skype chat %s" % chatName
         else:
             debug("Ignored (type)")
 
-    def bridgeChatToIRC(self, chatName, ircChannel):
-        self.channels[chatName] = ircChannel
-        ircChannel.setSkypeChat(SkypeClient.SkypeChat(self.skype, chatName))
+    def getChat(self, chatName):
+        channel = SkypeClient.SkypeChat(self.skype, chatName)
+        self.channels[chatName] = channel
+        return channel
 
     # Object to be passed to the IRC instance to encapsulate communicating with a particular skype chat
-    class SkypeChat:
+    class SkypeChat(BridgeEndPoint):
         def __init__(self, skype, chatName):
+            BridgeEndPoint.__init__(self)
             self.skype = skype
             self.chatName = chatName
 
-        def sendUserMessage(self, user, message):
+        def receiveUserMessage(self, user, message):
             debug("Passed message into Skype %s: <%s> %s" % (self.chatName, user, message))
             self.skype.Chat(self.chatName).SendMessage("%s: %s" % (user, message))
+
+        def description(self):
+            "Skype chat %s" % self.chatName
 
 
 # irc.  Currently one connection per channel, a future optimisation
 # would be to separate the IRC server connections from the channels
 
-class IrcChannelClient(irclib.SimpleIRCClient):
+class IrcChannelClient(irclib.SimpleIRCClient, BridgeEndPoint):
     def __init__(self, host, channel, nick):
         irclib.SimpleIRCClient.__init__(self)
+        BridgeEndPoint.__init__(self)
         self.host = host
         self.channel = channel.lower()
         self.nick = nick
@@ -80,11 +108,7 @@ class IrcChannelClient(irclib.SimpleIRCClient):
         user = user[0:user.index('!')]
         message = e.arguments()[0]
         debug("Message from IRC: <%s> %s" % (user, message))
-        if self.skypeChat is not None:
-            debug("Dispatched to SkypeChat")
-            self.skypeChat.sendUserMessage(user, message)
-        else:
-            print "Channel %s not bridged to skype, discarded message" % (self.channel)
+        self.pushUserMessage(user, message)
 
     def run(self):
         self.ircobj.process_forever()
@@ -93,26 +117,27 @@ class IrcChannelClient(irclib.SimpleIRCClient):
         self.connect(self.host, 6667, self.nick)
         threading.Thread(None, lambda: self.run()).start()
 
-    def setSkypeChat(self, skypeChat):
-        self.skypeChat = skypeChat
-
-    def sendUserMessage(self, user, message):
+    def receiveUserMessage(self, user, message):
         if self.connection is not None:
             debug("Passed message to IRC channel: %s <%s> %s" %(self.channel, user, message))
             self.connection.privmsg(self.channel, "%s: %s" % (user, message))
         else:
             print "IRC Client not connected"
 
+    def description(self):
+        return "IRC channel %s on %s" % (self.channel, self.host)
 
 # we maintain a one to one mapping of IRC channels to skype chats
 
 skypeInstance = SkypeClient()
 skypeInstance.connect()
 
-ircChannel = IrcChannelClient("irc.sitharus.com", "#wellingtonlunchchat", "cskype")
-ircChannel.connectChannel()
-skypeInstance.bridgeChatToIRC("#chris.andreae/$b81041707fc653fb", ircChannel)
+skypeChat = skypeInstance.getChat("#chris.andreae/$b81041707fc653fb")
 
+ircChannel = IrcChannelClient("irc.sitharus.com", "#wellingtonlunchchat", "cskype2")
+ircChannel.connectChannel()
+
+BridgeEndPoint.Bridge(skypeChat, ircChannel)
 
 print "Unblocked, manual loop"
 Cmd = ''
