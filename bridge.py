@@ -58,7 +58,7 @@ class SkypeClient:
         def sendUserMessage(self, user, message):
             debug("Passed message into Skype %s: <%s> %s" % (self.chatName, user, message))
             self.skype.Chat(self.chatName).SendMessage("%s: %s" % (user, message))
-            
+
 
 # irc.  Currently one connection per channel, a future optimisation
 # would be to separate the IRC server connections from the channels
@@ -85,7 +85,7 @@ class IrcChannelClient(irclib.SimpleIRCClient):
             self.skypeChat.sendUserMessage(user, message)
         else:
             print "Channel %s not bridged to skype, discarded message" % (self.channel)
-        
+
     def run(self):
         self.ircobj.process_forever()
 
