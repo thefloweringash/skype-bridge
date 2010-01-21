@@ -178,7 +178,8 @@ class IRCClient(irclib.SimpleIRCClient):
             self.channelName = channelName
 
         def receiveUserMessage(self, user, message):
-            self.server.sendMessageToChannel(self.channelName, "%s: %s" % (user, message))
+            for line in message.split("\n"):
+                self.server.sendMessageToChannel(self.channelName, "%s: %s" % (user, line))
 
         def description(self):
             return "IRC channel %s on %s" % (self.channelName, self.server.host)
