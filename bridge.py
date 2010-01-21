@@ -35,6 +35,47 @@ class BridgeEndPoint:
         end1.setEndPoint(end2)
         end2.setEndPoint(end1)
 
+# A filter endpoint wraps another endpoint, and permits filtering (modifying or swallowing)
+# incoming or outgoing messages.  Override filter_incoming/filter_outgoing, in subclasses,
+# return either new (user,message) tuple or null to eat the message
+class FilterEndPoint(BridgeEndPoint):
+    def __init__(self, target):
+        self.target = target
+
+    def receiveUserMessage(self, user, message):
+        filtered = self.filter_incoming(user, message)
+        if filtered:
+            (f_user, f_message) = filtered
+            self.target.receiveUserMessage(f_user, f_message)
+
+    def pushUserMessage(self, user, message):
+        filtered = self.filter_outgoing(user, message)
+        if filtered:
+            (f_user, f_message) = filtered
+            self.target.pushUserMessage(f_user, f_message)
+
+    def setEndPoint(self, endpoint):
+        self.target.setEndPoint(endpoint)
+
+    def description(self):
+        return self.target.description()
+
+    def filter_incoming(self, user, message):
+        return (user, message)
+
+    def filter_outgoing(self, user, message):
+        return (user, message)
+
+#example
+class IRCHighlightFilterEndPoint(FilterEndPoint):
+    def __init__(self, target, hilites):
+        FilterEndPoint.__init__(self, target)
+        self.hilites = hilites
+
+    def filter_incoming(self, user, message):
+        for hilit in self.hilites:
+            message = message.replace(hilit, "%s"%hilit);
+        return (user, message)
 
 # There is one skype instance.  We can get chat end points by calling its getChat method
 # with the id of the skype chat
@@ -156,9 +197,10 @@ ircServer.connectServer()
 
 ircChannel = ircServer.getChannel("#wellingtonlunchchat")
 ircChannel2 = ircServer.getChannel("#bridgedev")
+ircFilter = IRCHighlightFilterEndPoint(ircChannel2, ["chris", "lorne"])
 
 BridgeEndPoint.Bridge(skypeChat, ircChannel)
-BridgeEndPoint.Bridge(skypeChat2, ircChannel2)
+BridgeEndPoint.Bridge(skypeChat2, ircFilter)
 
 print "Unblocked, manual loop"
 Cmd = ''
