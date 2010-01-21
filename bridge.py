@@ -64,44 +64,60 @@ class SkypeClient:
 # would be to separate the IRC server connections from the channels
 
 class IrcChannelClient(irclib.SimpleIRCClient):
-    def __init__(self, host, channel, nick):
+    def __init__(self, host, nick):
         irclib.SimpleIRCClient.__init__(self)
         self.host = host
-        self.channel = channel.lower()
         self.nick = nick
+        self.channels = {}
 
     def on_welcome(self,c,e):
-        print "Welcomed to %s, joining %s!" % (self.host, self.channel)
-        c.join(self.channel)
-        print "Joined!"
+        print "Welcomed to %s!" % self.host
 
     def on_pubmsg(self,c,e):
-        user = e.source()
-        user = user[0:user.index('!')]
-        message = e.arguments()[0]
-        debug("Message from IRC: <%s> %s" % (user, message))
-        if self.skypeChat is not None:
-            debug("Dispatched to SkypeChat")
-            self.skypeChat.sendUserMessage(user, message)
+        channel = self.channels.get(e.target().lower())
+        if channel:
+            channel.on_pubmsg(c, e)
         else:
-            print "Channel %s not bridged to skype, discarded message" % (self.channel)
+            debug("Ignoring message from irc: %s %s %s" % (
+                    e.source(), e.target(), e.arguments()))
+
+    def channel(self, name):
+        name = name.lower()
+        print "Joining %s" % name
+        self.connection.join(name)
+        channel = IrcChannelClient.Channel(self.connection, name)
+        self.channels[name] = channel
+        return channel
 
     def run(self):
         self.ircobj.process_forever()
 
-    def connectChannel(self):
-        self.connect(self.host, 6667, self.nick)
+    def connect(self):
+        irclib.SimpleIRCClient.connect(self, self.host, 6667, self.nick)
         threading.Thread(None, lambda: self.run()).start()
 
-    def setSkypeChat(self, skypeChat):
-        self.skypeChat = skypeChat
 
-    def sendUserMessage(self, user, message):
-        if self.connection is not None:
+    class Channel(object):
+        def __init__(self, connection, name):
+            self.connection = connection
+            self.name = name
+
+        def setSkypeChat(self, skypeChat):
+            self.skypeChat = skypeChat
+
+        def on_pubmsg(self, c, e):
+            user = e.source()
+            user = user[0:user.index('!')]
+            message = e.arguments()[0]
+            debug("Message from IRC: <%s> %s" % (user, message))
+            if self.skypeChat is not None:
+                debug("Dispatched to SkypeChat")
+                self.skypeChat.sendUserMessage(user, message)
+            else:
+                print "Channel %s not bridged to skype, discarded message" % (self.channel)
+        def sendUserMessage(self, user, message):
             debug("Passed message to IRC channel: %s <%s> %s" %(self.channel, user, message))
             self.connection.privmsg(self.channel, "%s: %s" % (user, message))
-        else:
-            print "IRC Client not connected"
 
 
 # we maintain a one to one mapping of IRC channels to skype chats
@@ -109,9 +125,13 @@ class IrcChannelClient(irclib.SimpleIRCClient):
 skypeInstance = SkypeClient()
 skypeInstance.connect()
 
-ircChannel = IrcChannelClient("irc.sitharus.com", "#wellingtonlunchchat", "cskype")
-ircChannel.connectChannel()
-skypeInstance.bridgeChatToIRC("#chris.andreae/$b81041707fc653fb", ircChannel)
+ircSitharus = IrcChannelClient("irc.sitharus.com", "lskype")
+ircSitharus.connect()
+skypeInstance.bridgeChatToIRC("#chris.andreae/$b81041707fc653fb",
+                              ircSitharus.channel("#wellingtonlunchchat"))
+
+skypeInstance.bridgeChatToIRC("#chris.andreae/$c301b64f21991556",
+                              ircSitharus.channel("#flood"))
 
 
 print "Unblocked, manual loop"
