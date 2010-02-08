@@ -4,6 +4,8 @@ import sys
 import Skype4Py
 import irclib
 import threading
+import re
+import random
 
 DEBUG_VERBOSE = True
 def debug(str):
@@ -11,17 +13,18 @@ def debug(str):
         print str
 
 
-class BridgeEndPoint:
+class BridgeEndPoint(object):
     def __init__(self):
-        self.endpoint = None
+        super(BridgeEndPoint,self).__init__()
+        self.otherEnd = None
 
     def setEndPoint(self, endpoint):
-        self.endpoint = endpoint
+        self.otherEnd = endpoint
     
     def pushUserMessage(self, user, message):
-        if(self.endpoint):
+        if(self.otherEnd):
             debug("pushed message to remote end point")
-            self.endpoint.receiveUserMessage(user, message)
+            self.otherEnd.receiveUserMessage(user, message)
         else:
             print "Warning, discarded message on unconnected end point: %s" % self.description()
 
@@ -45,47 +48,81 @@ class BridgeEndPoint:
 # A filter endpoint wraps another endpoint, and permits filtering (modifying or swallowing)
 # incoming or outgoing messages.  Override filter_incoming/filter_outgoing, in subclasses,
 # return either new (user,message) tuple or null to eat the message
-class FilterEndPoint(BridgeEndPoint):
-    def __init__(self, target):
-        self.target = target
+class Filter:
+    def filter_incoming(self, user, message, ep):
+        return (user, message)
+
+    def filter_outgoing(self, user, message, ep):
+        return (user, message)
+
+
+class FilteringEndPoint(BridgeEndPoint):
+    def __init__(self):
+        BridgeEndPoint.__init__(self)
+        self.filters = []
 
     def receiveUserMessage(self, user, message):
-        filtered = self.filter_incoming(user, message)
-        if filtered:
-            (f_user, f_message) = filtered
-            self.target.receiveUserMessage(f_user, f_message)
+        keep = True;
+        for filter in self.filters:
+            filtered = filter.filter_incoming(user, message, self)
+            if filtered:
+                (user, message) = filtered
+            else:
+                keep = False;
+                break
+        if keep:
+            self.receiveUserMessageImpl(user, message)
+
+    def receiveUserMessageImpl(self, user, message):
+        raise Exception("Called abstract base receive");
 
     def pushUserMessage(self, user, message):
-        filtered = self.filter_outgoing(user, message)
-        if filtered:
-            (f_user, f_message) = filtered
-            self.target.pushUserMessage(f_user, f_message)
+        keep = True;
+        for filter in self.filters:
+            filtered = filter.filter_outgoing(user, message, self)
+            if filtered:
+                (user, message) = filtered
+            else:
+                keep = False;
+                break
+        if keep:
+            super(FilteringEndPoint, self).pushUserMessage(user, message)
 
-    def setEndPoint(self, endpoint):
-        self.target.setEndPoint(endpoint)
+    def addFilter(self, filter):
+        self.filters.append(filter)
 
-    def description(self):
-        return self.target.description()
-
-    def filter_incoming(self, user, message):
-        return (user, message)
-
-    def filter_outgoing(self, user, message):
-        return (user, message)
-
-    def destroy(self):
-        self.target.destroy()
 
 #example
-class IRCHighlightFilterEndPoint(FilterEndPoint):
-    def __init__(self, target, hilites):
-        FilterEndPoint.__init__(self, target)
+class IRCHighlightFilter(Filter):
+    def __init__(self, hilites):
         self.hilites = hilites
 
-    def filter_incoming(self, user, message):
+    def filter_incoming(self, user, message, ep):
         for hilit in self.hilites:
             message = message.replace(hilit, "%s"%hilit);
         return (user, message)
+
+#more example
+class RollingFilter(Filter):
+    def filter_outgoing(self, user, message, ep):
+        print "into outgoing filter: %s and %s" % (user, message)
+        if re.match("/roll", message):
+            r = random.randint(1,100)
+            m = "%s rolls: %s" % (user, r)
+            ep.receiveUserMessageImpl("dice", m)
+            return ("dice", m) # and push
+        else:
+            return (user, message)
+
+    def filter_incoming(self, user, message, ep):
+        print "into incoming filter: %s and %s" % (user, message)
+        if re.match("\s*/roll", message):
+            r = random.randint(1,100)
+            m = "%s rolls: %s" % (user, r)
+            ep.pushUserMessage("dice", m)
+            return ("dice", m) # and receive
+        else:
+            return (user, message)
 
 # There is one skype instance.  We can get chat end points by calling its getChat method
 # with the id of the skype chat
@@ -117,25 +154,27 @@ class SkypeClient:
             else:
                 print "Ignored message from unassociated Skype chat %s" % chatName
         else:
-            debug("Ignored (type)")
+            debug("Ignored message by type: %s" % (Status))
 
     def getChat(self, chatName):
-        channel = SkypeClient.SkypeChat(self, self.skype, chatName)
-        self.channels[chatName] = channel
+        channel = self.channels.get(chatName)
+        if not channel:
+            channel = SkypeClient.SkypeChat(self, self.skype, chatName)
+            self.channels[chatName] = channel
         return channel
 
     def removeChat(self, chatName):
         self.channels[chatName] = None
 
     # Object to be passed to the IRC instance to encapsulate communicating with a particular skype chat
-    class SkypeChat(BridgeEndPoint):
+    class SkypeChat(FilteringEndPoint):
         def __init__(self, skypeClient, skype, chatName):
-            BridgeEndPoint.__init__(self)
+            FilteringEndPoint.__init__(self)
             self.skypeClient = skypeClient
             self.skype = skype
             self.chatName = chatName
 
-        def receiveUserMessage(self, user, message):
+        def receiveUserMessageImpl(self, user, message):
             debug("Passed message into Skype %s: <%s> %s" % (self.chatName, user, message))
             self.skype.Chat(self.chatName).SendMessage("%s: %s" % (user, message))
 
@@ -180,10 +219,12 @@ class IRCClient(irclib.SimpleIRCClient):
         
     def getChannel(self, channelName):
         channelName = channelName.lower()
-        self.connection.join(channelName) # actually connect to the channel
-        print "Joined IRC channel %s" % channelName
-        channel = IRCClient.IRCChannel(self, channelName)
-        self.channels[channelName] = channel
+        channel = self.channels.get(channelName)
+        if not channel:
+            self.connection.join(channelName) # actually connect to the channel
+            print "Joined IRC channel %s" % channelName
+            channel = IRCClient.IRCChannel(self, channelName)
+            self.channels[channelName] = channel
         return channel
 
     def sendMessageToChannel(self, channelName, message):
@@ -195,13 +236,13 @@ class IRCClient(irclib.SimpleIRCClient):
         self.channels[channelName] = None
         # Todo: check size of channels hash, disconnect if empty
 
-    class IRCChannel(BridgeEndPoint):
+    class IRCChannel(FilteringEndPoint):
         def __init__(self, server, channelName):
-            BridgeEndPoint.__init__(self)
+            FilteringEndPoint.__init__(self)
             self.server = server
             self.channelName = channelName
 
-        def receiveUserMessage(self, user, message):
+        def receiveUserMessageImpl(self, user, message):
             for line in message.split("\n"):
                 self.server.sendMessageToChannel(self.channelName, "%s: %s" % (user, line))
 
@@ -243,20 +284,23 @@ class BridgeManager:
 m = BridgeManager()
 
 skypeChat = m.createEndpoint('skype', {"chat": "#chris.andreae/$b81041707fc653fb"})
-skypeChat2 = m.createEndpoint('skype', {"chat": "#skype.irc.bridge/$andrew.childs.cons;18d2f66a4e56f2dd"})
+#skypeChat2 = m.createEndpoint('skype', {"chat": "#skype.irc.bridge/$andrew.childs.cons;18d2f66a4e56f2dd"})
 
 ircChannel = m.createEndpoint("irc", {"server": "irc.sitharus.com","nick": "cskype", "channel": "#wellingtonlunchchat"})
-ircChannel2 = m.createEndpoint("irc", {"server": "irc.sitharus.com","nick": "cskype", "channel": "#bridgedev"})
+#ircChannel2 = m.createEndpoint("irc", {"server": "irc.sitharus.com","nick": "cskype", "channel": "#bridgedev"})
 
-ircChannelx = m.createEndpoint("irc", {"server": "irc.sitharus.com","nick": "circ", "channel": "#bridgedev"})
-ircChannely = m.createEndpoint("irc", {"server": "irc.sitharus.com","nick": "circ", "channel": "#bridgedev2"})
+#ircChannelx = m.createEndpoint("irc", {"server": "irc.sitharus.com","nick": "circ", "channel": "#bridgedev"})
+#ircChannely = m.createEndpoint("irc", {"server": "irc.sitharus.com","nick": "circ", "channel": "#bridgedev2"})
 
-ircFilter = IRCHighlightFilterEndPoint(ircChannel2, ["chris", "lorne"])
+#ircFilter = IRCHighlightFilterEndPoint(ircChannel2, ["chris", "lorne"])
+
+rollingFilter = RollingFilter()
+skypeChat.addFilter(rollingFilter)
 
 bridge1 = m.bridge(skypeChat, ircChannel)
-bridge2 = m.bridge(skypeChat2, ircFilter)
 
-bridge3 = m.bridge(ircChannelx, ircChannely)
+#bridge2 = m.bridge(skypeChat2, ircFilter)
+#bridge3 = m.bridge(ircChannelx, ircChannely)
 
 print "Unblocked, manual loop"
 Cmd = ''
