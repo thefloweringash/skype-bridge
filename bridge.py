@@ -199,18 +199,58 @@ class IRCClient(irclib.SimpleIRCClient):
     def on_welcome(self,c,e):
         print "Welcomed to %s, ready to join!" % (self.host)
 
+    def get_user(self, s):
+        return s[0:s.index('!')]
+
     def on_pubmsg(self,c,e):
         channelName = e.target().lower()
-        user = e.source()
-        user = user[0:user.index('!')]
+        user = self.get_user(e.source())
         message = e.arguments()[0]
         debug("Message from IRC: %s | <%s> %s" % (channelName, user, message))
+        self.dispatch_message(channelName, user, message)
+
+    def on_action(self,c,e):
+        channelName = e.target().lower()
+        user = self.get_user(e.source())
+        message = e.arguments()[0]
+        debug("Message from IRC: %s | <%s> %s" % (channelName, user, message))
+        self.dispatch_message(channelName, "emote", "%s %s" % (user, message));
+
+    def dispatch_message(self, channelName, user, message):
         channel = self.channels.get(channelName)
         if channel:
             debug("pushing message")
             channel.pushUserMessage(user, message)
         else:
             print "Ignoring message, no channel"
+    
+    def on_ctcp(self,c,e):
+        if e.arguments()[0] != 'ACTION':
+            print "C is %s\n e.target is %s\ne.source is %s\ne.arguments[0] is %s\n e.arguments[1] is %s" % (c, e.target(), e.source(), e.arguments()[0], e.arguments()[1])
+
+
+    def on_nick(self,c,e):
+        old_user = self.get_user(e.source())
+        new_user = e.target()
+        for channel in self.channels.keys():
+            self.channels.get(channel).pushUserMessage("nick", "%s is now known as %s" % (old_user, new_user))
+
+    def on_quit(self,c,e):
+        user = self.get_user(e.source())
+        message = e.arguments()[0]
+        for channel in self.channels.keys():
+            self.channels.get(channel).pushUserMessage("irc", "%s has quit: %s" % (user, message))
+
+    def on_part(self,c,e):
+        user = self.get_user(e.source())
+        for channel in self.channels.keys():
+            self.channels.get(channel).pushUserMessage("irc", "%s has left" % user)
+
+    def on_join(self,c,e):
+        user = self.get_user(e.source())
+        for channel in self.channels.keys():
+            self.channels.get(channel).pushUserMessage("irc", "%s has joined" % user)
+
 
     def connectServer(self):
         print "Connecting to irc server %s.."%self.host
