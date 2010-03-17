@@ -226,7 +226,9 @@ class IRCClient(irclib.SimpleIRCClient):
     
     def on_ctcp(self,c,e):
         if e.arguments()[0] != 'ACTION':
-            print "C is %s\n e.target is %s\ne.source is %s\ne.arguments[0] is %s\n e.arguments[1] is %s" % (c, e.target(), e.source(), e.arguments()[0], e.arguments()[1])
+            print "CTCP received: c is %s\ne.target is %s\ne.source is %s\n" % (c, e.target(), e.source())
+            for i in range(0,len(e.arguments())):
+                print "e.arguments[i] is %s\n" % (e.arguments()[i])
 
 
     def on_nick(self,c,e):
