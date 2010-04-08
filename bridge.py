@@ -189,15 +189,19 @@ class SkypeClient:
 # irc. 
 
 class IRCClient(irclib.SimpleIRCClient):
-    def __init__(self, host, nick):
+    def __init__(self, host, nick, password):
         irclib.SimpleIRCClient.__init__(self)
         self.host = host
         self.nick = nick
+        self.password = password
         self.channels = {}
         self.connectServer()
 
     def on_welcome(self,c,e):
         print "Welcomed to %s, ready to join!" % (self.host)
+        if self.password != None:
+            self.connection.privmsg("nickserv", "identify %s" % self.password)
+
 
     def get_user(self, s):
         return s[0:s.index('!')]
@@ -214,7 +218,7 @@ class IRCClient(irclib.SimpleIRCClient):
         user = self.get_user(e.source())
         message = e.arguments()[0]
         debug("Message from IRC: %s | <%s> %s" % (channelName, user, message))
-        self.dispatch_message(channelName, "emote", "%s %s" % (user, message));
+        self.dispatch_message(channelName, "emote", "%s %s" % (user, message))
 
     def dispatch_message(self, channelName, user, message):
         channel = self.channels.get(channelName)
@@ -226,9 +230,7 @@ class IRCClient(irclib.SimpleIRCClient):
     
     def on_ctcp(self,c,e):
         if e.arguments()[0] != 'ACTION':
-            print "CTCP received: c is %s\ne.target is %s\ne.source is %s\n" % (c, e.target(), e.source())
-            for i in range(0,len(e.arguments())):
-                print "e.arguments[i] is %s\n" % (e.arguments()[i])
+            self.print_debug("CTCP message", c, e)
 
 
     def on_nick(self,c,e):
@@ -253,6 +255,18 @@ class IRCClient(irclib.SimpleIRCClient):
         for channel in self.channels.keys():
             self.channels.get(channel).pushUserMessage("irc", "%s has joined" % user)
 
+    def on_invite(self, c, e):
+        print "Invite to %s received from %s" % (e.arguments()[0],  e.source())
+        self.connection.join(e.arguments()[0])
+
+    def on_inviteonlychan(self, c, e):
+        print "Channel %s is invite-only, requesting invitation from chanserv.." % (e.arguments()[0])
+        self.connection.privmsg("chanserv", "invite %s" % (e.arguments()[0]))
+
+    def print_debug(self, name, c, e):
+        print "event %s received: c is %s\ne.target is %s\ne.source is %s\n" % (name, c, e.target(), e.source())
+        for i in range(0,len(e.arguments())):
+            print "e.arguments[%d] is %s\n" % (i, e.arguments()[i])
 
     def connectServer(self):
         print "Connecting to irc server %s.."%self.host
@@ -286,7 +300,9 @@ class IRCClient(irclib.SimpleIRCClient):
 
         def receiveUserMessageImpl(self, user, message):
             for line in message.split("\n"):
-                self.server.sendMessageToChannel(self.channelName, "%s: %s" % (user, line))
+                message = u"%s: %s" % (user, line)
+                safe_message = message.encode("utf-8", "replace")
+                self.server.sendMessageToChannel(self.channelName, safe_message)
 
         def description(self):
             return "IRC channel %s on %s" % (self.channelName, self.server.host)
@@ -311,7 +327,7 @@ class BridgeManager:
             key = (server, nick) = (params["server"], params["nick"])
             s = self.ircServers.get(key)
             if not s:
-                s = IRCClient(server, nick)
+                s = IRCClient(server, nick, params.get("password"))
                 self.ircServers[key] = s
             return s.getChannel(params["channel"])
         else:
