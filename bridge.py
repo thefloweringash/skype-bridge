@@ -6,6 +6,7 @@ import irclib
 import threading
 import re
 import random
+import time
 
 DEBUG_VERBOSE = True
 def debug(str):
@@ -201,7 +202,9 @@ class IRCClient(irclib.SimpleIRCClient):
         print "Welcomed to %s, ready to join!" % (self.host)
         if self.password != None:
             self.connection.privmsg("nickserv", "identify %s" % self.password)
-
+        for channelName in self.channels.keys():
+            print "Re-joining channel: %s" % (channelName)
+            self.connection.join(channelName)
 
     def get_user(self, s):
         return s[0:s.index('!')]
@@ -272,7 +275,18 @@ class IRCClient(irclib.SimpleIRCClient):
         print "Connecting to irc server %s.."%self.host
         self.connect(self.host, 6667, self.nick)
         threading.Thread(None, lambda: self.ircobj.process_forever()).start()
+        threading.Thread(None, lambda: self.maintain_server_connection()).start()
         
+    def maintain_server_connection(self):
+        print "Running server connection check"
+        while True:
+            try:
+                self.connection.ping(self.nick)  # lazy: why check for pong, when it lets me know it's disconnected
+                time.sleep(20)
+            except irclib.ServerConnectionError:
+                print "Disconnect detected, reconnecting to IRC server.."
+                self.connect(self.host, 6667, self.nick)
+
     def getChannel(self, channelName):
         channelName = channelName.lower()
         channel = self.channels.get(channelName)
