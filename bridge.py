@@ -281,11 +281,14 @@ class IRCClient(irclib.SimpleIRCClient):
         print "Running server connection check"
         while True:
             try:
-                self.connection.ping(self.nick)  # lazy: why check for pong, when it lets me know it's disconnected
                 time.sleep(20)
+                self.connection.ping(self.nick)  # lazy: why check for pong, when it lets me know it's disconnected
             except irclib.ServerConnectionError:
                 print "Disconnect detected, reconnecting to IRC server.."
-                self.connect(self.host, 6667, self.nick)
+                try:
+                    self.connect(self.host, 6667, self.nick)
+                except irclib.ServerConnectionError:
+                    print "Could not reconnect, looping"
 
     def getChannel(self, channelName):
         channelName = channelName.lower()
