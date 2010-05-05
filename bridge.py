@@ -133,12 +133,35 @@ class SkypeClient:
         self.skype = Skype4Py.Skype(Transport='x11')
         self.skype.OnAttachmentStatus = lambda s: self.onSkypeAttach(s)
         self.skype.OnMessageStatus = lambda m, s: self.onSkypeMessageStatus(m, s)
+        self.skype.OnNotify = lambda n: self.onSkypeNotify(n)
+        self.skype.OnChatMembersChanged = lambda n: pass
         self.connect()
 
     def connect(self):
         print 'Connecting to Skype...'
         self.skype.Attach()
         print 'Connected to Skype.'
+
+    def onSkypeNotify(self, notification):
+        #debug('Received low level skype notify: %s' % notification)
+        type, b = Skype4Py.utils.chop(notification)
+        if type == 'CHATMESSAGE':
+            object_id, prop_name, value = Skype4Py.utils.chop(b, 2)
+            message = Skype4Py.skype.ChatMessage(self.skype, object_id)
+            ## when a message is edited, we get a sequence of edited_timestamp/edited_by/body CHATMESSAGE messages. 
+            ## these cause the underlying ChatMessage object to be altered, so all we need to do is snag the notification
+            ## for the last of the sequence (BODY), and fire off an edit notification using the updated values in the message
+
+            if prop_name == 'BODY':  
+                editor = message.EditedBy 
+                sender = message.FromDisplayName
+                chatName = message.Chat.Name
+                messageBody = message.Body
+                sendMessage =  "[edited by %s] %s" % (editor, messageBody)
+                if self.channels.get(chatName) is not None:
+                    debug("Dispatched edit from skype instance to chat endpoint")
+                    self.channels[chatName].pushUserMessage(sender, sendMessage)
+                        
 
     def onSkypeAttach(self, status):
         debug('API attachment status: ' + self.skype.Convert.AttachmentStatusToText(status))
