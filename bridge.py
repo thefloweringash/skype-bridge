@@ -134,7 +134,7 @@ class SkypeClient:
         self.skype.OnAttachmentStatus = lambda s: self.onSkypeAttach(s)
         self.skype.OnMessageStatus = lambda m, s: self.onSkypeMessageStatus(m, s)
         self.skype.OnNotify = lambda n: self.onSkypeNotify(n)
-        self.skype.OnChatMembersChanged = lambda n: pass
+        self.skype.OnChatMembersChanged = lambda n: debug("chat members changed")
         self.connect()
 
     def connect(self):
