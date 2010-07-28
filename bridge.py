@@ -339,10 +339,18 @@ class IRCClient(irclib.SimpleIRCClient):
             self.channelName = channelName
 
         def receiveUserMessageImpl(self, user, message):
+            chunk_size = 415 - len(user) - 4;  # trial and error, probably server specific
             for line in message.split("\n"):
-                message = u"%s: %s" % (user, line)
-                safe_message = message.encode("utf-8", "replace")
-                self.server.sendMessageToChannel(self.channelName, safe_message)
+                length = len(line);
+                off = 0;
+                while off < length:
+                    step = min(chunk_size, (length - off))
+                    chunk = line[off : (off + step)]
+                    off += step
+
+                    enc_chunk = u"%s: %s" % (user, chunk)
+                    safe_chunk = enc_chunk.encode("utf-8", "replace")
+                    self.server.sendMessageToChannel(self.channelName, safe_chunk)
 
         def description(self):
             return "IRC channel %s on %s" % (self.channelName, self.server.host)
