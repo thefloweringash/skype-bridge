@@ -297,9 +297,16 @@ class IRCClient(irclib.SimpleIRCClient):
     def connectServer(self):
         print "Connecting to irc server %s.."%self.host
         self.connect(self.host, 6667, self.nick)
-        threading.Thread(None, lambda: self.ircobj.process_forever()).start()
+        threading.Thread(None, lambda: self.process_forever_with_catch()).start()
         threading.Thread(None, lambda: self.maintain_server_connection()).start()
-        
+    
+    def process_forever_with_catch(self):
+        while True:
+            try:
+                self.ircobj.process_forever()
+            except Exception:
+                print "Exception in irc process_forever, retrying"
+    
     def maintain_server_connection(self):
         print "Running server connection check"
         while True:
