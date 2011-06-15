@@ -150,13 +150,19 @@ class SkypeClient:
             message = Skype4Py.skype.ChatMessage(self.skype, object_id)
             ## when a message is edited, we get a sequence of edited_timestamp/edited_by/body CHATMESSAGE messages. 
             ## these cause the underlying ChatMessage object to be altered, so all we need to do is snag the notification
-            ## for the last of the sequence (BODY), and fire off an edit notification using the updated values in the message
+            ## for the last of the sequence (BODY), and fire off an edit notification.
+
+            ## Unfortunately we can't use the updated value for the
+            ## message in the ChatMessage object, since those won't
+            ## be updated until this message is *processed*, which
+            ## occurs after this hook.  The value field in this
+            ## notification should be good enough though
 
             if prop_name == 'BODY':  
                 editor = message.EditedBy 
                 sender = message.FromDisplayName
                 chatName = message.Chat.Name
-                messageBody = message.Body
+                messageBody = value #message.Body
                 sendMessage =  "[edited by %s] %s" % (editor, messageBody)
                 if self.channels.get(chatName) is not None:
                     debug("Dispatched edit from skype instance to chat endpoint")
