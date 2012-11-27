@@ -7,6 +7,7 @@ import threading
 import re
 import random
 import time
+import traceback
 
 DEBUG_VERBOSE = True
 def debug(str):
@@ -278,14 +279,14 @@ class IRCClient(irclib.SimpleIRCClient):
             self.channels.get(channel).pushUserMessage("irc", "%s has quit: %s" % (user, message))
 
     def on_part(self,c,e):
+        channelName = e.target().lower()
         user = self.get_user(e.source())
-        for channel in self.channels.keys():
-            self.channels.get(channel).pushUserMessage("irc", "%s has left" % user)
+        self.channels.get(channelName).pushUserMessage("irc", "%s has left" % user)
 
     def on_join(self,c,e):
+        channelName = e.target().lower()
         user = self.get_user(e.source())
-        for channel in self.channels.keys():
-            self.channels.get(channel).pushUserMessage("irc", "%s has joined" % user)
+        self.channels.get(channelName).pushUserMessage("irc", "%s has joined" % user)
 
     def on_invite(self, c, e):
         print "Invite to %s received from %s" % (e.arguments()[0],  e.source())
@@ -312,6 +313,7 @@ class IRCClient(irclib.SimpleIRCClient):
                 self.ircobj.process_forever()
             except Exception:
                 print "Exception in irc process_forever, retrying"
+                print traceback.format_exc()
     
     def maintain_server_connection(self):
         print "Running server connection check"
