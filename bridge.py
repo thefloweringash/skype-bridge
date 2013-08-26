@@ -225,6 +225,7 @@ class IRCClient(irclib.SimpleIRCClient):
         self.host = host
         self.nick = nick
         self.password = password
+        self.announce = False
         self.channels = {}
         self.connectServer()
 
@@ -275,18 +276,21 @@ class IRCClient(irclib.SimpleIRCClient):
     def on_quit(self,c,e):
         user = self.get_user(e.source())
         message = e.arguments()[0]
-        for channel in self.channels.keys():
-            self.channels.get(channel).pushUserMessage("irc", "%s has quit: %s" % (user, message))
+        if self.announce:
+            for channel in self.channels.keys():
+                self.channels.get(channel).pushUserMessage("irc", "%s has quit: %s" % (user, message))
 
     def on_part(self,c,e):
         channelName = e.target().lower()
-        user = self.get_user(e.source())
-        self.channels.get(channelName).pushUserMessage("irc", "%s has left" % user)
+        if self.announce:
+            user = self.get_user(e.source())
+            self.channels.get(channelName).pushUserMessage("irc", "%s has left" % user)
 
     def on_join(self,c,e):
         channelName = e.target().lower()
-        user = self.get_user(e.source())
-        self.channels.get(channelName).pushUserMessage("irc", "%s has joined" % user)
+        if self.announce:
+            user = self.get_user(e.source())
+            self.channels.get(channelName).pushUserMessage("irc", "%s has joined" % user)
 
     def on_invite(self, c, e):
         print "Invite to %s received from %s" % (e.arguments()[0],  e.source())
